@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pointage V2</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <script
+      src="https://unpkg.com/html5-qrcode"
+      type="text/javascript"
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  </head>
+  <style>
+    #reader {
+      position: relative;
+      width: 250px;
+      height: 250px;
+      margin: auto;
+      border: 2px solid #00c853; /* vert foncé de base */
+      border-radius: 8px;
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    #reader::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 8px;
+      pointer-events: none;
+      z-index: 2;
+
+      /* Serpent vert qui suit les bords */
+      background: linear-gradient(90deg, transparent, #1c901c, transparent);
+      background-size: 200% 2px;
+      background-repeat: no-repeat;
+      animation: borderMove 4s linear infinite;
+    }
+
+    @keyframes borderMove {
+      0% {
+        background-position: -100% 0;
+      }
+      25% {
+        background-position: 100% 0;
+      }
+      50% {
+        background-position: 100% 100%;
+      }
+      75% {
+        background-position: -100% 100%;
+      }
+      100% {
+        background-position: -100% 0;
+      }
+    }
+
+    #reader video {
+      width: 100%;
+      height: 100%;
+      transform: scaleX(-1);
+      border-radius: 8px;
+    }
+  </style>
+
+  <body class="bg-light">
+    <div class="container py-4">
+      <img
+        src="Assets/Logo/Logo Antehiroka final.png"
+        class="d-block mx-auto img-fluid"
+        style="max-width: 100px"
+        alt=""
+      />
+
+      <div
+        id="reader"
+        class="border rounded bg-white shadow-sm mb-4"
+        style="width: 320px; margin: auto"
+      ></div>
+
+      <div class="mb-3" style="max-width: 400px; margin: auto">
+        <input
+          type="text"
+          id="nomInput"
+          class="form-control"
+          placeholder="Nom associé au code scanné"
+        />
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5>Liste des Pointages</h5>
+        <div>
+          <button class="btn btn-success me-2" onclick="exportToExcel()">
+            Exporter Excel
+          </button>
+          <button class="btn btn-danger" onclick="resetData()">
+            Réinitialiser
+          </button>
+        </div>
+      </div>
+      <div class="mb-3" style="max-width: 300px">
+        <input
+          type="text"
+          id="filterInput"
+          class="form-control"
+          placeholder="Filtrer par code, nom ou date"
+          oninput="renderTable()"
+        />
+      </div>
+
+      <table class="table table-bordered table-striped">
+        <thead class="table-dark">
+          <tr>
+            <th>#</th>
+            <th>Code</th>
+            <th>Nom</th>
+            <th>Entrée Matin</th>
+            <th>Entrée Après-midi</th>
+            <th>Sortie Soir</th>
+            <th>Date</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+
+    <script>
+      let data = [];
+      let codeToName = {};
+
+      function loadData() {
+        const stored = localStorage.getItem("pointages");
+        if (stored) data = JSON.parse(stored);
+
+        const nameMap = localStorage.getItem("codeToName");
+        if (nameMap) codeToName = JSON.parse(nameMap);
+
+        renderTable();
+      }
+
+      function saveData() {
+        localStorage.setItem("pointages", JSON.stringify(data));
+        localStorage.setItem("codeToName", JSON.stringify(codeToName));
+      }
+
+      function dataGrouped() {
+        const grouped = {};
+        data.forEach((entry) => {
+          const key = `${entry.code}_${entry.date}`;
+          if (!grouped[key]) {
+            grouped[key] = {
+              code: entry.code,
+              nom: entry.nom,
+              date: entry.date,
+              actions: [],
+            };
+          }
+          grouped[key].actions.push(entry);
+        });
+
+        const rows = [];
+        for (const key in grouped) {
+          const { code, nom, date, actions } = grouped[key];
+          actions.sort((a, b) => a.heure.localeCompare(b.heure));
+          const a = { entree1: "", sortie1: "", entree2: "", sortie2: "" };
+          let step = 0;
+          for (const act of actions) {
+            if (act.action === "Entrée" && step === 0) {
+              a.entree1 = act.heure;
+              step = 1;
+            } else if (act.action === "Sortie" && step === 1) {
+              a.sortie1 = act.heure;
+              step = 2;
+            } else if (act.action === "Entrée" && step === 2) {
+              a.entree2 = act.heure;
+              step = 3;
+            } else if (act.action === "Sortie" && step === 3) {
+              a.sortie2 = act.heure;
+            }
+          }
+
+          rows.push({
+            code,
+            nom,
+            entree1: a.entree1,
+            entree2: a.entree2,
+            sortie2: a.sortie2,
+            date,
+          });
+        }
+
+        // Trier par date descendante
+        return rows.sort(
+          (a, b) =>
+            new Date(b.date.split("/").reverse().join("/")) -
+            new Date(a.date.split("/").reverse().join("/"))
+        );
+      }
+
+      function renderTable() {
+        const tbody = document.getElementById("table-body");
+        tbody.innerHTML = "";
+
+        const filter =
+          document.getElementById("filterInput")?.value.toLowerCase() || "";
+        const allRows = dataGrouped().filter(
+          (row) =>
+            row.code.toLowerCase().includes(filter) ||
+            row.nom.toLowerCase().includes(filter) ||
+            row.date.toLowerCase().includes(filter)
+        );
+
+        allRows.forEach((row, i) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+      <td>${i + 1}</td>
+      <td>${row.code}</td>
+      <td><input type="text" value="${
+        row.nom
+      }" onchange="editValue(${i}, 'nom', this.value)" /></td>
+      <td><input type="time" value="${
+        row.entree1
+      }" onchange="editValue(${i}, 'entree1', this.value)" /></td>
+      <td><input type="time" value="${
+        row.entree2
+      }" onchange="editValue(${i}, 'entree2', this.value)" /></td>
+      <td><input type="time" value="${
+        row.sortie2
+      }" onchange="editValue(${i}, 'sortie2', this.value)" /></td>
+      <td>${row.date}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteEntry(${i})">Supprimer</button></td>
+    `;
+          tbody.appendChild(tr);
+        });
+      }
+
+      function editValue(index, field, value) {
+        const row = dataGrouped()[index];
+        const entries = data.filter(
+          (d) => d.code === row.code && d.date === row.date
+        );
+
+        if (field === "nom") {
+          entries.forEach((e) => (e.nom = value));
+          codeToName[row.code] = value;
+        } else {
+          const actionMap = {
+            entree1: 0,
+            entree2: 2,
+            sortie2: 3,
+          };
+          const entry = entries[actionMap[field]];
+          if (entry) entry.heure = value;
+        }
+
+        saveData();
+        renderTable();
+      }
+
+      function deleteEntry(index) {
+        const row = dataGrouped()[index];
+        data = data.filter(
+          (d) => !(d.code === row.code && d.date === row.date)
+        );
+        saveData();
+        renderTable();
+      }
+
+      function resetData() {
+        document.getElementById("nomInput").value = "";
+
+        Swal.fire({
+          title: "Confirmer",
+          text: "Voulez-vous vraiment tout réinitialiser ?",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonText: "Oui",
+          cancelButtonText: "Non",
+        }).then((result) => {
+          if (result.isConfirmed) {
+            data = [];
+            codeToName = {};
+            saveData();
+            renderTable();
+            Swal.fire(
+              "Réinitialisé",
+              "Tous les pointages ont été supprimés.",
+              "success"
+            );
+          }
+        });
+      }
+
+      function isAtLeastOneMinuteLater(heureDebut) {
+        const [h, m, s] = heureDebut.split(":").map(Number);
+        const start = new Date();
+        start.setHours(h, m, s || 0, 0);
+        const now = new Date();
+        return now - start >= 1800000;
+      }
+
+      function onScanSuccess(code) {
+        const now = new Date();
+        const date = now.toLocaleDateString("fr-FR");
+        const heure = now.toLocaleTimeString("fr-FR");
+
+        const inputNom = document.getElementById("nomInput").value.trim();
+        const nom = codeToName[code] || inputNom;
+
+        if (!nom) {
+          Swal.fire(
+            "Nom requis",
+            "Veuillez entrer un nom pour ce code.",
+            "warning"
+          );
+          return;
+        }
+
+        if (!codeToName[code]) {
+          codeToName[code] = nom;
+        }
+
+        const todayEntries = data.filter(
+          (d) => d.code === code && d.date === date
+        );
+        const last = todayEntries.length
+          ? todayEntries[todayEntries.length - 1]
+          : null;
+
+        let action;
+        if (!last || last.action === "Sortie") {
+          action = "Entrée";
+        } else if (last.action === "Entrée") {
+          if (isAtLeastOneMinuteLater(last.heure)) {
+            action = "Sortie";
+          } else {
+            Swal.fire(
+              "Info",
+              "Trop de tentatives, ressayez ultérieurement",
+              "info"
+            );
+            return;
+          }
+        }
+
+        const entry = { code, nom, action, date, heure };
+        data.push(entry);
+        saveData();
+        renderTable();
+
+        document.getElementById("nomInput").value = "";
+
+        Swal.fire({
+          icon: "success",
+          title: `${action} enregistrée avec succès !`,
+          confirmButtonText: "Scanner un autre code",
+        });
+      }
+
+      function exportToExcel() {
+        const flatData = data.map((d) => ({
+          Code: d.code,
+          Nom: d.nom,
+          Action: d.action,
+          Date: d.date,
+          Heure: d.heure,
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(flatData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Pointages");
+        XLSX.writeFile(wb, "pointages.xlsx");
+      }
+
+      loadData();
+
+      const html5QrCode = new Html5Qrcode("reader");
+
+      Html5Qrcode.getCameras().then((devices) => {
+        if (devices && devices.length) {
+          const backCamera = devices.find((d) =>
+            d.label.toLowerCase().includes("back")
+          );
+          const cameraId = backCamera ? backCamera.id : devices[0].id;
+
+          html5QrCode
+            .start(
+              cameraId,
+              { fps: 10, qrbox: { width: 250, height: 250 } },
+              (decodedText) => {
+                html5QrCode.stop();
+                onScanSuccess(decodedText);
+                setTimeout(() => {
+                  html5QrCode.start(
+                    cameraId,
+                    { fps: 10, qrbox: 250 },
+                    onScanSuccess
+                  );
+                }, 2000);
+              },
+              () => {}
+            )
+            .catch((err) => {
+              console.error("Erreur de démarrage du scanner:", err);
+            });
+        } else {
+          alert("Aucune caméra trouvée.");
+        }
+      });
+    </script>
+  </body>
+</html>
