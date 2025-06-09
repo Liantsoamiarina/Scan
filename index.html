@@ -21,7 +21,7 @@
       width: 250px;
       height: 250px;
       margin: auto;
-      border: 2px solid #00c853; /* vert foncé de base */
+      border: 2px solid #00c853;
       border-radius: 8px;
       overflow: hidden;
       z-index: 1;
@@ -37,8 +37,6 @@
       border-radius: 8px;
       pointer-events: none;
       z-index: 2;
-
-      /* Serpent vert qui suit les bords */
       background: linear-gradient(90deg, transparent, #1c901c, transparent);
       background-size: 200% 2px;
       background-repeat: no-repeat;
@@ -69,6 +67,30 @@
       transform: scaleX(-1);
       border-radius: 8px;
     }
+
+    @media (max-width: 576px) {
+      #reader {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 1;
+      }
+
+      .d-flex.justify-content-between {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch !important;
+      }
+
+      .btn {
+        width: 100%;
+      }
+
+      .table th,
+      .table td {
+        font-size: 12px;
+        padding: 0.25rem;
+      }
+    }
   </style>
 
   <body class="bg-light">
@@ -95,7 +117,9 @@
         />
       </div>
 
-      <div class="d-flex justify-content-between align-items-center mb-3">
+      <div
+        class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2"
+      >
         <h5>Liste des Pointages</h5>
         <div>
           <button class="btn btn-success me-2" onclick="exportToExcel()">
@@ -116,7 +140,9 @@
         />
       </div>
 
-      <table class="table table-bordered table-striped">
+      <div class="table-responsive">
+  <table class="table table-bordered table-striped">
+
         <thead class="table-dark">
           <tr>
             <th>#</th>
@@ -131,8 +157,7 @@
         </thead>
         <tbody id="table-body"></tbody>
       </table>
-    </div>
-
+      </div>
     <script>
       let data = [];
       let codeToName = {};
